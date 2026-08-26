@@ -1,0 +1,54 @@
+  Ticker Tracker — Resumen
+
+  Estructura de archivos creada
+
+  ticker_tracker/
+  ├── app/
+  │   ├── main.py          # FastAPI app + lifespan + todos los endpoints
+  │   ├── database.py      # SQLAlchemy async + aiosqlite
+  │   ├── models.py        # Ticker, DailyPrice, IntradayPrice
+  │   ├── schemas.py       # Pydantic v2 schemas
+  │   ├── crud.py          # Operaciones DB
+  │   ├── data_fetcher.py  # Yahoo Finance + stubs de fallback (Alpha Vantage / Polygon)
+  │   ├── scheduler.py     # APScheduler: precio actual c/5min + histórico diario
+  │   └── auth.py          # HTTP Basic Auth
+  ├── requirements.txt
+  ├── Dockerfile           # python:3.12-slim multi-arch
+  ├── docker-compose.yml   # platform: linux/arm64 (Ugreen DXP2800)
+  └── .env.example
+
+  API REST (todos los endpoints con Basic Auth salvo /health)
+
+  ┌────────┬────────────────────────────────────────────┬──────────────────────────────────────────┐
+  │ Método │                    Ruta                    │               Descripción                │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ GET    │ /health                                    │ Health check público                     │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ GET    │ /api/tickers                               │ Listar tickers                           │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ POST   │ /api/tickers                               │ Añadir ticker (lanza backfill inmediato) │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ PUT    │ /api/tickers/{symbol}                      │ Actualizar nombre/habilitado             │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ DELETE │ /api/tickers/{symbol}                      │ Eliminar ticker y sus datos              │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ GET    │ /api/quotes/{symbol}/current               │ Precio actual (último snapshot)          │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ GET    │ /api/quotes/{symbol}/date/2024-01-15       │ Precio diario en fecha concreta          │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ GET    │ /api/quotes/{symbol}/history?start=…&end=… │ Histórico por rango                      │
+  ├────────┼────────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ GET    │ /api/quotes/{symbol}/intraday?date=…       │ Snapshots intradiarios de un día         │
+  └────────┴────────────────────────────────────────────┴──────────────────────────────────────────┘
+
+  Despliegue en el NAS
+
+  cp .env.example .env        # edita API_USER y API_PASSWORD
+  mkdir -p data
+  docker compose build        # construye imagen ARM64
+  docker compose up -d        # arranca en background
+
+  Fallbacks configurados en data_fetcher.py
+
+  Los dos métodos _fetch_historical_fallback y _fetch_current_price_fallback tienen el esqueleto completo de Alpha Vantage documentado en los docstrings — solo tienes que descomentar el código y añadir
+  ALPHA_VANTAGE_API_KEY al .env.

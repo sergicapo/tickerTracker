@@ -1,0 +1,21 @@
+services:
+  ticker-tracker:
+    build: .
+    # No platform pin — Docker uses the host's native architecture.
+    # Build and run this on the Ugreen DXP2800 NAS (ARM64) for native performance.
+    container_name: ticker-tracker
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist the SQLite database across container restarts
+      - ./data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

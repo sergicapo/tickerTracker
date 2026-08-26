@@ -1,0 +1,1 @@
+# Ticker Tracker application package
