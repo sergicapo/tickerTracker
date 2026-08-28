@@ -11,6 +11,8 @@ from typing import Optional
 
 import yfinance as yf
 
+from app import custom_fetchers
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +33,13 @@ def fetch_historical(
 
     Raises nothing — on error logs a warning and returns an empty list.
     """
+    if custom_fetchers.has_custom_historical(symbol):
+        try:
+            return custom_fetchers.fetch_historical(symbol, start_date, end_date)
+        except Exception as exc:
+            logger.error("Custom historical fetch failed for %s: %s", symbol, exc)
+            return []
+
     try:
         return _fetch_historical_yahoo(symbol, start_date, end_date)
     except Exception as primary_exc:
@@ -65,6 +74,13 @@ def fetch_current_price(symbol: str) -> Optional[dict]:
 
     Returns None on error.
     """
+    if custom_fetchers.has_custom_current(symbol):
+        try:
+            return custom_fetchers.fetch_current(symbol)
+        except Exception as exc:
+            logger.error("Custom current-price fetch failed for %s: %s", symbol, exc)
+            return None
+
     try:
         return _fetch_current_price_yahoo(symbol)
     except Exception as primary_exc:
