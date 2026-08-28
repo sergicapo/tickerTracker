@@ -1,7 +1,7 @@
 """
-Custom fetcher for XS2538440780 from live.euronext.com.
+Custom fetcher for Euronext-listed bonds via live.euronext.com.
 
-The instrument page (https://live.euronext.com/en/product/bonds/XS2538440780-MOTX)
+The instrument page (e.g. https://live.euronext.com/en/product/bonds/{ISIN}-{MIC})
 renders its price via an empty placeholder div that Drupal fills in
 client-side through an AJAX call. The response body isn't plain HTML: it's a
 CryptoJS-AES-encrypted JSON blob (``{"ct": ..., "iv": ..., "s": ...}``) that
@@ -20,7 +20,8 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
@@ -32,14 +33,27 @@ logger = logging.getLogger(__name__)
 
 # --- Scraper Implementation ---
 
-_BOND_SYMBOL = "XS2538440780"
-_INSTRUMENT = f"{_BOND_SYMBOL}-MOTX"
-_PAGE_URL = f"https://live.euronext.com/en/product/bonds/{_INSTRUMENT}"
-_AJAX_URL = f"https://live.euronext.com/en/ajax/getIntradayPrice/{_INSTRUMENT}"
+# symbol -> Euronext MIC (Market Identifier Code) for the instrument's listing.
+_BOND_MICS: dict[str, str] = {
+    "XS2538440780": "MOTX",  # ROMANIA TF 5% ST26
+    "DE000BU25000": "MOTX",  # BOBL TF 2,2% AP28
+    "BE0000365743": "MOTX",  # BEL FX OCT30 EUR
+    "XS2447602793": "MOTX",  # POLAND TF 2,75% MG
+    "XS2680932907": "MOTX",  # HUN FX SEP33 EUR
+    "FR0010070060": "MOTX",  # OAT APR35 EUR 4,75
+}
 
 # Fallback passphrase used by the site's ajax_secure module. It's normally
 # exposed in drupalSettings.ajax_secure.kye but is stable across requests.
 _DEFAULT_AJAX_KEY = "24ayqVo7yJma"
+
+# The ajax_secure key rarely changes, so cache it instead of re-fetching the
+# instrument page (an extra GET) on every current-price call. TTL is a safety
+# net in case Euronext rotates it; a decrypt failure also forces a refresh.
+_KEY_CACHE_TTL = timedelta(minutes=30)
+_key_cache_lock = threading.Lock()
+_cached_ajax_key: str | None = None
+_cached_ajax_key_expiry: datetime | None = None
 
 _HEADERS = {
     "User-Agent": (
@@ -79,10 +93,37 @@ def _http_post(url: str, *, extra_headers: dict | None = None) -> str:
     return resp.text
 
 
-def _fetch_ajax_secure_key() -> str:
+def _get_ajax_secure_key(page_url: str, *, force_refresh: bool = False) -> str:
+    """
+    Return the ajax_secure passphrase, cached in-process for `_KEY_CACHE_TTL`.
+
+    Pass `force_refresh=True` to bypass the cache (e.g. after a failed
+    decrypt, in case Euronext rotated the key).
+    """
+    global _cached_ajax_key, _cached_ajax_key_expiry
+
+    with _key_cache_lock:
+        if (
+            not force_refresh
+            and _cached_ajax_key is not None
+            and _cached_ajax_key_expiry is not None
+            and datetime.utcnow() < _cached_ajax_key_expiry
+        ):
+            return _cached_ajax_key
+
+    key = _fetch_ajax_secure_key(page_url)
+
+    with _key_cache_lock:
+        _cached_ajax_key = key
+        _cached_ajax_key_expiry = datetime.utcnow() + _KEY_CACHE_TTL
+
+    return key
+
+
+def _fetch_ajax_secure_key(page_url: str) -> str:
     """Read drupalSettings.ajax_secure.kye from the instrument page, if present."""
     try:
-        page = _http_get(_PAGE_URL)
+        page = _http_get(page_url)
         match = re.search(r'"ajax_secure":\{"kye":"([^"]+)"\}', page)
         if match:
             return match.group(1)
@@ -112,36 +153,53 @@ def _decrypt_cryptojs_aes(payload: dict, password: str) -> str:
     return json.loads(plaintext.decode("utf-8"))
 
 
-def _fetch_current_xs2538440780() -> float | None:
+def _fetch_current_price(symbol: str, mic: str) -> float | None:
+    instrument = f"{symbol}-{mic}"
+    page_url = f"https://live.euronext.com/en/product/bonds/{instrument}"
+    ajax_url = f"https://live.euronext.com/en/ajax/getIntradayPrice/{instrument}"
+
     try:
         raw = _http_post(
-            _AJAX_URL,
-            extra_headers={"Referer": _PAGE_URL, "X-Requested-With": "XMLHttpRequest"},
+            ajax_url,
+            extra_headers={"Referer": page_url, "X-Requested-With": "XMLHttpRequest"},
         )
         payload = json.loads(raw)
-        ajax_key = _fetch_ajax_secure_key()
-        table_html = _decrypt_cryptojs_aes(payload, ajax_key)
+
+        ajax_key = _get_ajax_secure_key(page_url)
+        try:
+            table_html = _decrypt_cryptojs_aes(payload, ajax_key)
+        except (ValueError, KeyError):
+            # Cached key may be stale (Euronext rotated it) — refetch once.
+            logger.info("Euronext ajax_secure key looks stale for %s, refreshing.", symbol)
+            ajax_key = _get_ajax_secure_key(page_url, force_refresh=True)
+            table_html = _decrypt_cryptojs_aes(payload, ajax_key)
 
         doc = html.fromstring(table_html)
         price_cells = doc.xpath("//table[@id='AwlIntradayPriceTable']//tbody/tr[1]/td[2]/text()")
         if not price_cells or not price_cells[0].strip():
-            logger.error("Price cell not found in Euronext intraday-price response for %s", _BOND_SYMBOL)
+            logger.error("Price cell not found in Euronext intraday-price response for %s", symbol)
             return None
 
         price_txt = price_cells[0].strip().replace("\xa0", "").replace(",", "")
         return float(price_txt)
     except Exception as exc:
-        logger.error("Error fetching current price for %s: %s", _BOND_SYMBOL, exc)
+        logger.error("Error fetching current price for %s: %s", symbol, exc)
         return None
 
 
 # --- Registration (for app/custom_fetchers/__init__.py autodiscovery) ---
 
-@register_current(_BOND_SYMBOL)
-def _current(symbol: str) -> dict:
-    price = _fetch_current_xs2538440780()
-    return {
-        "price": price,
-        "volume": None,
-        "timestamp": datetime.utcnow(),
-    }
+def _register_bond_tickers() -> None:
+    for symbol, mic in _BOND_MICS.items():
+
+        @register_current(symbol)
+        def _current(symbol: str, _mic: str = mic) -> dict:
+            price = _fetch_current_price(symbol, _mic)
+            return {
+                "price": price,
+                "volume": None,
+                "timestamp": datetime.utcnow(),
+            }
+
+
+_register_bond_tickers()
