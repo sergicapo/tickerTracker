@@ -51,6 +51,7 @@ from app.schemas import (
     TickerResponse,
     TickerUpdate,
 )
+from app.sources import DataSource, validate_source_config
 
 # ---------------------------------------------------------------------------
 # Default tickers to seed when the database is empty
@@ -155,6 +156,11 @@ async def add_ticker(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Ticker '{body.symbol.upper()}' already exists.",
         )
+
+    config_error = validate_source_config(body.data_source, body.source_config)
+    if config_error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=config_error)
+
     ticker = await crud.create_ticker(db, body)
 
     # Trigger immediate historical backfill for the new ticker (background task)
@@ -180,6 +186,14 @@ async def update_ticker(
     ticker = await crud.get_ticker_by_symbol(db, symbol)
     if not ticker:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticker '{symbol.upper()}' not found.")
+
+    if body.data_source is not None or body.source_config is not None:
+        effective_source = body.data_source or DataSource(ticker.data_source)
+        effective_config = body.source_config if body.source_config is not None else ticker.source_config
+        config_error = validate_source_config(effective_source, effective_config)
+        if config_error:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=config_error)
+
     updated = await crud.update_ticker(db, ticker, body)
     return updated
 
