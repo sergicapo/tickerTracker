@@ -44,11 +44,13 @@ async def create_ticker(session: AsyncSession, data: TickerCreate) -> Ticker:
         symbol=data.symbol.upper(),
         name=data.name,
         enabled=True,
+        data_source=data.data_source.value,
+        source_config=data.source_config,
         created_at=datetime.utcnow(),
     )
     session.add(ticker)
     await session.flush()  # get the generated id without committing
-    logger.info("Created ticker %s (id=%d)", ticker.symbol, ticker.id)
+    logger.info("Created ticker %s (id=%d, source=%s)", ticker.symbol, ticker.id, ticker.data_source)
     return ticker
 
 
@@ -59,6 +61,10 @@ async def update_ticker(
         ticker.name = data.name
     if data.enabled is not None:
         ticker.enabled = data.enabled
+    if data.data_source is not None:
+        ticker.data_source = data.data_source.value
+    if data.source_config is not None:
+        ticker.source_config = data.source_config
     session.add(ticker)
     await session.flush()
     logger.info("Updated ticker %s", ticker.symbol)

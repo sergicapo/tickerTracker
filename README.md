@@ -2,6 +2,8 @@
 
 Aplicación para seguimiento de cotizaciones bursátiles. Descarga el histórico diario y captura el precio actual cada 5 minutos. Expone una API REST protegida con Basic Auth.
 
+Cada ticker tiene asignado un **origen de datos** (`data_source`) explícito — `yahoo_finance` (por defecto), `euronext` o `finanzen_ch` — que determina de dónde se obtienen sus precios. Algunos orígenes requieren configuración adicional por ticker (`source_config`), como el mercado (MIC) en Euronext o la URL del snapshot en finanzen.ch.
+
 **Stack:** Python 3.12 · FastAPI · SQLite · yfinance · APScheduler · Docker
 
 ---
@@ -72,6 +74,82 @@ curl http://localhost:8000/health
 
 ---
 
+## Orígenes de datos (`data_source`)
+
+Cada ticker está asociado a exactamente un origen de datos, que decide cómo se obtiene su precio actual y su histórico diario. Se define al crear el ticker (`POST /api/tickers`) y puede cambiarse después (`PUT /api/tickers/{symbol}`).
+
+| `data_source` | Precio actual | Histórico diario | `source_config` requerido |
+|---|---|---|---|
+| `yahoo_finance` _(por defecto)_ | ✅ Yahoo Finance (fallback opcional a Alpha Vantage) | ✅ Yahoo Finance (fallback opcional a Alpha Vantage) | Ninguno |
+| `euronext` | ✅ `live.euronext.com` (precio del último trade intradía) | ❌ No disponible | `{"mic": "<Market Identifier Code>"}` |
+| `finanzen_ch` | ✅ Snapshot de finanzen.ch | ✅ (sintetiza una única barra OHLC diaria a partir del snapshot) | `{"url": "<URL de la página del bono en finanzen.ch>"}` |
+
+Si el `data_source` elegido requiere `source_config` y no se aporta (o le faltan campos), la API responde **422 Unprocessable Entity** con el detalle del campo que falta — no se llega a crear/actualizar el ticker.
+
+### `yahoo_finance`
+
+Sin configuración adicional. El `symbol` se pasa directamente a `yfinance`.
+
+```bash
+curl -u admin:changeme \
+  -X POST http://localhost:8000/api/tickers \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "NVDA", "name": "NVIDIA Corporation"}'
+```
+
+(Omitir `data_source` es equivalente a indicar `"data_source": "yahoo_finance"`.)
+
+### `euronext`
+
+Para bonos listados en Euronext (`live.euronext.com`). Requiere el **MIC** (Market Identifier Code) del mercado donde cotiza el ISIN — por ejemplo `MOTX` para el mercado MOT. El MIC no se puede derivar del ISIN; hay que consultarlo en la página del instrumento en Euronext.
+
+```bash
+curl -u admin:changeme \
+  -X POST http://localhost:8000/api/tickers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "XS2538440780",
+    "name": "ROMANIA TF 5% ST26",
+    "data_source": "euronext",
+    "source_config": {"mic": "MOTX"}
+  }'
+```
+
+Solo expone precio actual — no tiene histórico diario, así que el job de backfill no descargará nada para estos tickers.
+
+### `finanzen_ch`
+
+Para bonos publicados en finanzen.ch. Requiere la URL completa de la página del bono (snapshot).
+
+```bash
+curl -u admin:changeme \
+  -X POST http://localhost:8000/api/tickers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "US912810SS87.SG",
+    "name": "US-T Govt Bond 1.625 Nov15 2050",
+    "data_source": "finanzen_ch",
+    "source_config": {
+      "url": "https://www.finanzen.ch/obligationen/united_states_of_americadl-bonds_202050-obligation-2050-us912810ss87?a=1"
+    }
+  }'
+```
+
+Como finanzen.ch solo expone el último precio (no una serie histórica), el histórico diario se sintetiza guardando ese snapshot como una barra OHLC de un único valor para el día en curso.
+
+### Cambiar el origen de un ticker existente
+
+```bash
+curl -u admin:changeme \
+  -X PUT http://localhost:8000/api/tickers/XS2538440780 \
+  -H "Content-Type: application/json" \
+  -d '{"data_source": "euronext", "source_config": {"mic": "MOTX"}}'
+```
+
+Si solo se cambian `name` o `enabled` sin tocar `data_source`/`source_config`, no se revalida la configuración del origen actual.
+
+---
+
 ## API Reference
 
 Todos los endpoints excepto `/health` requieren **HTTP Basic Auth**.
@@ -110,13 +188,17 @@ curl -u admin:changeme http://localhost:8000/api/tickers
     "symbol": "AAPL",
     "name": "Apple Inc.",
     "enabled": true,
+    "data_source": "yahoo_finance",
+    "source_config": null,
     "created_at": "2024-03-15T09:00:00"
   },
   {
-    "id": 2,
-    "symbol": "BTC-USD",
-    "name": "Bitcoin USD",
+    "id": 8,
+    "symbol": "XS2538440780",
+    "name": "ROMANIA TF 5% ST26",
     "enabled": true,
+    "data_source": "euronext",
+    "source_config": {"mic": "MOTX"},
     "created_at": "2024-03-15T09:00:00"
   }
 ]
@@ -126,9 +208,12 @@ curl -u admin:changeme http://localhost:8000/api/tickers
 
 #### `POST /api/tickers` — Añadir ticker
 
-Tras añadirlo, lanza automáticamente la descarga del histórico en segundo plano.
+Tras añadirlo, lanza automáticamente la descarga del histórico en segundo plano (si el `data_source` la soporta — ver [Orígenes de datos](#orígenes-de-datos-data_source)).
+
+`data_source` es opcional (por defecto `yahoo_finance`). `source_config` es obligatorio para algunos orígenes.
 
 ```bash
+# Yahoo Finance (por defecto) — sin source_config
 curl -u admin:changeme \
   -X POST http://localhost:8000/api/tickers \
   -H "Content-Type: application/json" \
@@ -141,8 +226,23 @@ curl -u admin:changeme \
   "symbol": "NVDA",
   "name": "NVIDIA Corporation",
   "enabled": true,
+  "data_source": "yahoo_finance",
+  "source_config": null,
   "created_at": "2024-03-15T11:00:00"
 }
+```
+
+```bash
+# Euronext — requiere source_config.mic
+curl -u admin:changeme \
+  -X POST http://localhost:8000/api/tickers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "XS2538440780",
+    "name": "ROMANIA TF 5% ST26",
+    "data_source": "euronext",
+    "source_config": {"mic": "MOTX"}
+  }'
 ```
 
 Errores:
@@ -150,11 +250,16 @@ Errores:
 ```json
 // 409 — el ticker ya existe
 { "detail": "Ticker 'NVDA' already exists." }
+
+// 422 — falta source_config para el data_source elegido
+{ "detail": "source_config.mic is required for the euronext data source (e.g. {\"mic\": \"MOTX\"})." }
 ```
 
 ---
 
 #### `PUT /api/tickers/{symbol}` — Actualizar ticker
+
+Permite modificar `name`, `enabled`, `data_source` y/o `source_config`. Si se cambia el origen de datos (o su configuración), se revalida contra el nuevo origen antes de guardar.
 
 ```bash
 # Deshabilitar un ticker (deja de actualizar sus precios)
@@ -168,6 +273,12 @@ curl -u admin:changeme \
   -X PUT http://localhost:8000/api/tickers/NVDA \
   -H "Content-Type: application/json" \
   -d '{"name": "NVIDIA Corp."}'
+
+# Cambiar el origen de datos (euronext requiere source_config.mic)
+curl -u admin:changeme \
+  -X PUT http://localhost:8000/api/tickers/XS2538440780 \
+  -H "Content-Type: application/json" \
+  -d '{"data_source": "euronext", "source_config": {"mic": "MOTX"}}'
 ```
 
 ```json
@@ -176,8 +287,20 @@ curl -u admin:changeme \
   "symbol": "NVDA",
   "name": "NVIDIA Corp.",
   "enabled": false,
+  "data_source": "yahoo_finance",
+  "source_config": null,
   "created_at": "2024-03-15T11:00:00"
 }
+```
+
+Errores:
+
+```json
+// 404 — el ticker no existe
+{ "detail": "Ticker 'NVDA' not found." }
+
+// 422 — falta source_config para el nuevo data_source
+{ "detail": "source_config.url is required for the finanzen_ch data source." }
 ```
 
 ---
@@ -413,9 +536,14 @@ ticker_tracker/
 │   ├── models.py        # Modelos ORM (Ticker, DailyPrice, IntradayPrice)
 │   ├── schemas.py       # Schemas Pydantic v2
 │   ├── crud.py          # Operaciones de base de datos
-│   ├── data_fetcher.py  # Yahoo Finance (primario) + Alpha Vantage (fallback)
+│   ├── data_fetcher.py  # Despacha al DataSource asignado a cada ticker
 │   ├── scheduler.py     # Jobs APScheduler
-│   └── auth.py          # HTTP Basic Auth
+│   ├── auth.py          # HTTP Basic Auth
+│   └── sources/         # Orígenes de datos (uno por data_source)
+│       ├── __init__.py       # Registro central (DataSource enum, decoradores)
+│       ├── yahoo_finance.py  # Yahoo Finance (primario) + Alpha Vantage (fallback)
+│       ├── euronext.py       # live.euronext.com (bonos, requiere source_config.mic)
+│       └── finanzen_ch.py    # finanzen.ch (bonos, requiere source_config.url)
 ├── data/                # Volumen Docker — contiene ticker_tracker.db
 ├── Dockerfile
 ├── docker-compose.yml
@@ -428,6 +556,6 @@ ticker_tracker/
 
 | Tabla | Descripción |
 |---|---|
-| `tickers` | Lista de símbolos configurados |
+| `tickers` | Lista de símbolos configurados, con su `data_source` y `source_config` (JSON) |
 | `daily_prices` | OHLCV diario por ticker (único por ticker + fecha) |
 | `intraday_prices` | Snapshots de precio cada 5 minutos |

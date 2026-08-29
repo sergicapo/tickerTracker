@@ -4,9 +4,11 @@ SQLAlchemy ORM models for Ticker Tracker.
 from datetime import datetime, date
 from sqlalchemy import (
     Integer, String, Boolean, Float, Date, DateTime,
-    ForeignKey, UniqueConstraint, BigInteger
+    ForeignKey, UniqueConstraint, BigInteger, JSON
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from app.sources import DEFAULT_DATA_SOURCE
 
 
 class Base(DeclarativeBase):
@@ -20,6 +22,10 @@ class Ticker(Base):
     symbol: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    data_source: Mapped[str] = mapped_column(
+        String(32), default=DEFAULT_DATA_SOURCE.value, nullable=False
+    )
+    source_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )

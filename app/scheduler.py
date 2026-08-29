@@ -20,6 +20,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app import crud, data_fetcher
 from app.database import get_session
+from app.sources import DataSource
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +48,21 @@ async def job_fetch_intraday() -> None:
         return
 
     for ticker in tickers:
-        await _fetch_and_store_intraday(ticker.id, ticker.symbol)
+        await _fetch_and_store_intraday(
+            ticker.id, ticker.symbol, DataSource(ticker.data_source), ticker.source_config
+        )
 
 
-async def _fetch_and_store_intraday(ticker_id: int, symbol: str) -> None:
+async def _fetch_and_store_intraday(
+    ticker_id: int,
+    symbol: str,
+    data_source: DataSource,
+    source_config: Optional[dict],
+) -> None:
     result = await asyncio.get_event_loop().run_in_executor(
-        None, data_fetcher.fetch_current_price, symbol
+        None, data_fetcher.fetch_current_price, symbol, data_source, source_config
     )
-    if result is None:
+    if result is None or result.get("price") is None:
         logger.warning("Could not fetch current price for %s — skipping.", symbol)
         return
 
@@ -90,7 +98,14 @@ async def job_fetch_daily() -> None:
         tickers = await crud.list_tickers(session, enabled_only=True)
 
     for ticker in tickers:
-        await _fetch_and_store_daily(ticker.id, ticker.symbol, yesterday, yesterday)
+        await _fetch_and_store_daily(
+            ticker.id,
+            ticker.symbol,
+            yesterday,
+            yesterday,
+            DataSource(ticker.data_source),
+            ticker.source_config,
+        )
 
 
 async def _fetch_and_store_daily(
@@ -98,10 +113,12 @@ async def _fetch_and_store_daily(
     symbol: str,
     start: date,
     end: date,
+    data_source: DataSource,
+    source_config: Optional[dict],
 ) -> None:
     rows = await asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: data_fetcher.fetch_historical(symbol, start, end),
+        lambda: data_fetcher.fetch_historical(symbol, start, end, data_source, source_config),
     )
     if not rows:
         logger.warning("No daily data returned for %s (%s–%s).", symbol, start, end)
@@ -159,7 +176,14 @@ async def job_historical_backfill(ticker_id: Optional[int] = None) -> None:
         logger.info(
             "Backfilling %s from %s to %s.", ticker.symbol, start, today
         )
-        await _fetch_and_store_daily(ticker.id, ticker.symbol, start, today)
+        await _fetch_and_store_daily(
+            ticker.id,
+            ticker.symbol,
+            start,
+            today,
+            DataSource(ticker.data_source),
+            ticker.source_config,
+        )
 
 
 # ---------------------------------------------------------------------------

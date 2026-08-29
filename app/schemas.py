@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.sources import DataSource, DEFAULT_DATA_SOURCE
+
 
 # ---------------------------------------------------------------------------
 # Ticker schemas
@@ -17,12 +19,26 @@ class TickerBase(BaseModel):
 
 
 class TickerCreate(TickerBase):
-    pass
+    data_source: DataSource = Field(
+        default=DEFAULT_DATA_SOURCE,
+        examples=["yahoo_finance"],
+        description="Data source used to fetch prices for this ticker.",
+    )
+    source_config: Optional[dict] = Field(
+        default=None,
+        examples=[{"mic": "MOTX"}],
+        description=(
+            "Source-specific configuration, e.g. {\"mic\": \"MOTX\"} for euronext "
+            "or {\"url\": \"https://...\"} for finanzen_ch."
+        ),
+    )
 
 
 class TickerUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=256)
     enabled: Optional[bool] = None
+    data_source: Optional[DataSource] = None
+    source_config: Optional[dict] = None
 
 
 class TickerResponse(TickerBase):
@@ -30,6 +46,8 @@ class TickerResponse(TickerBase):
 
     id: int
     enabled: bool
+    data_source: DataSource
+    source_config: Optional[dict]
     created_at: datetime
 
 
