@@ -7,13 +7,16 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from app.models import Base
+from app.models import Base, Ticker
+from app.sources import DEFAULT_DATA_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +46,41 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def init_db() -> None:
-    """Create all tables if they do not exist."""
+    """Create all tables if they do not exist, then apply lightweight migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _migrate_schema(conn)
     logger.info("Database tables initialised.")
+
+
+async def _migrate_schema(conn: AsyncConnection) -> None:
+    """
+    Add columns that `create_all` won't add to a pre-existing table.
+
+    `Base.metadata.create_all` only creates missing tables — it never alters
+    an existing one. Older deployments (e.g. a database volume created before
+    the `data_source` / `source_config` columns existed) need those columns
+    added explicitly, or every query against `tickers` fails with
+    "no such column".
+    """
+    existing_columns = {
+        col["name"] for col in await conn.run_sync(
+            lambda sync_conn: inspect(sync_conn).get_columns(Ticker.__tablename__)
+        )
+    }
+
+    if "data_source" not in existing_columns:
+        await conn.execute(
+            text(
+                "ALTER TABLE tickers ADD COLUMN data_source VARCHAR(32) "
+                f"NOT NULL DEFAULT '{DEFAULT_DATA_SOURCE.value}'"
+            )
+        )
+        logger.info("Migrated tickers table: added data_source column.")
+
+    if "source_config" not in existing_columns:
+        await conn.execute(text("ALTER TABLE tickers ADD COLUMN source_config JSON"))
+        logger.info("Migrated tickers table: added source_config column.")
 
 
 async def close_db() -> None:
