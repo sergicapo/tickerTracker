@@ -120,6 +120,20 @@ async def _fetch_and_store_daily(
         None,
         lambda: data_fetcher.fetch_historical(symbol, start, end, data_source, source_config),
     )
+
+    covered_dates = {row["date"] for row in rows}
+    missing_dates = [
+        start + timedelta(days=n)
+        for n in range((end - start).days + 1)
+        if start + timedelta(days=n) not in covered_dates
+    ]
+    if missing_dates:
+        async with get_session() as session:
+            for missing_date in missing_dates:
+                derived = await crud.derive_daily_bar_from_intraday(session, ticker_id, missing_date)
+                if derived is not None:
+                    rows.append(derived)
+
     if not rows:
         logger.warning("No daily data returned for %s (%s–%s).", symbol, start, end)
         return

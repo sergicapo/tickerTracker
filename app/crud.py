@@ -291,6 +291,36 @@ async def insert_intraday_price(
     return row
 
 
+async def derive_daily_bar_from_intraday(
+    session: AsyncSession, ticker_id: int, price_date: date
+) -> Optional[dict]:
+    """
+    Build a daily OHLC(V) bar from the IntradayPrice rows captured on `price_date`.
+
+    Used as a fallback for data sources with no real historical endpoint
+    (euronext) or where the historical fetch came back empty (finanzen_ch):
+    the intraday snapshots taken throughout the day are the closest thing to
+    a daily bar we have, with the last snapshot standing in for the close.
+    Returns None if no intraday rows were captured that day.
+    """
+    rows = await get_intraday_for_date(session, ticker_id, price_date)
+    if not rows:
+        return None
+
+    prices = [row.price for row in rows]
+    volumes = [row.volume for row in rows if row.volume is not None]
+    volume = sum(volumes) if len(volumes) == len(rows) else None
+
+    return {
+        "date": price_date,
+        "open": prices[0],
+        "high": max(prices),
+        "low": min(prices),
+        "close": prices[-1],
+        "volume": volume,
+    }
+
+
 async def delete_intraday_before(
     session: AsyncSession, ticker_id: int, before_dt: datetime
 ) -> int:
