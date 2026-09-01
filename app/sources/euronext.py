@@ -1,4 +1,4 @@
-solo tien"""
+"""
 Data source: live.euronext.com, for bonds listed on Euronext markets.
 
 Requires per-ticker `source_config = {"mic": "<Market Identifier Code>"}`
