@@ -32,12 +32,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 from lxml import html
 
 from app.sources import DataSource, register_config_validator, register_current, register_historical
+from app.timeutils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ def _current_from_url(url: str) -> dict:
     return {
         "price": price,
         "volume": None,
-        "timestamp": datetime.utcnow(),
+        "timestamp": utcnow(),
     }
 
 

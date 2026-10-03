@@ -61,6 +61,7 @@ curl http://localhost:8000/health
 | `LOG_LEVEL` | `INFO` | Nivel de log (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `FETCH_INTERVAL_MINUTES` | `5` | Frecuencia de captura de precio actual |
 | `HISTORICAL_START_DATE` | `2020-01-01` | Fecha desde la que se descarga el histórico |
+| `INTRADAY_RETENTION_DAYS` | `30` | Días que se conservan los snapshots intradiarios (limpieza diaria a las 01:00 UTC) |
 | `ALPHA_VANTAGE_API_KEY` | _(vacío)_ | API key para el fallback de Alpha Vantage |
 
 ---
@@ -70,6 +71,7 @@ curl http://localhost:8000/health
 - **Al arrancar:** descarga el histórico diario (desde `HISTORICAL_START_DATE` o desde el último dato guardado) para todos los tickers habilitados.
 - **Cada 5 minutos:** captura el precio actual de cada ticker y lo guarda en `intraday_prices`.
 - **Cada día a las 00:05 UTC:** descarga el OHLCV del día anterior para todos los tickers habilitados.
+- **Cada día a las 01:00 UTC:** elimina los snapshots intradiarios con más de `INTRADAY_RETENTION_DAYS` días.
 - **Tickers por defecto** (primera ejecución): `AAPL`, `MSFT`, `GOOGL`, `AMZN`, `BTC-USD`.
 
 ---
@@ -538,6 +540,7 @@ ticker_tracker/
 │   ├── crud.py          # Operaciones de base de datos
 │   ├── data_fetcher.py  # Despacha al DataSource asignado a cada ticker
 │   ├── scheduler.py     # Jobs APScheduler
+│   └── timeutils.py     # Helper de tiempo UTC
 │   ├── auth.py          # HTTP Basic Auth
 │   └── sources/         # Orígenes de datos (uno por data_source)
 │       ├── __init__.py       # Registro central (DataSource enum, decoradores)

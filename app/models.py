@@ -9,6 +9,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.sources import DEFAULT_DATA_SOURCE
+from app.timeutils import utcnow
 
 
 class Base(DeclarativeBase):
@@ -27,7 +28,7 @@ class Ticker(Base):
     )
     source_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
 
     daily_prices: Mapped[list["DailyPrice"]] = relationship(

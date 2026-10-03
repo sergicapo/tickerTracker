@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Secrets / environment
+.env
+
+# Local data (SQLite database, Docker volume)
+data/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
