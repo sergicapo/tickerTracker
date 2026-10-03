@@ -37,6 +37,7 @@ from Crypto.Util.Padding import unpad
 from lxml import html
 
 from app.sources import DataSource, register_config_validator, register_current
+from app.timeutils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def _get_ajax_secure_key(page_url: str, *, force_refresh: bool = False) -> str:
             not force_refresh
             and _cached_ajax_key is not None
             and _cached_ajax_key_expiry is not None
-            and datetime.utcnow() < _cached_ajax_key_expiry
+            and utcnow() < _cached_ajax_key_expiry
         ):
             return _cached_ajax_key
 
@@ -114,7 +115,7 @@ def _get_ajax_secure_key(page_url: str, *, force_refresh: bool = False) -> str:
 
     with _key_cache_lock:
         _cached_ajax_key = key
-        _cached_ajax_key_expiry = datetime.utcnow() + _KEY_CACHE_TTL
+        _cached_ajax_key_expiry = utcnow() + _KEY_CACHE_TTL
 
     return key
 
@@ -202,5 +203,5 @@ def _current(symbol: str, config: dict) -> dict:
     return {
         "price": price,
         "volume": None,
-        "timestamp": datetime.utcnow(),
+        "timestamp": utcnow(),
     }

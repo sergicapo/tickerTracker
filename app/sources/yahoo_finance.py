@@ -17,6 +17,7 @@ from typing import Optional
 import yfinance as yf
 
 from app.sources import DataSource, register_current, register_historical
+from app.timeutils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ def _fetch_current_price_yahoo(symbol: str) -> dict:
     return {
         "price": price,
         "volume": volume,
-        "timestamp": datetime.utcnow(),
+        "timestamp": utcnow(),
     }
 
 
@@ -269,7 +270,7 @@ def _fetch_current_price_fallback(symbol: str) -> dict:
     return {
         "price": price,
         "volume": _safe_int(quote.get("06. volume")),
-        "timestamp": datetime.utcnow(),
+        "timestamp": utcnow(),
     }
 
     # TODO: FALLBACK SOURCE — add a second fallback here (e.g. Polygon.io) if needed

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyPrice, IntradayPrice, Ticker
 from app.schemas import TickerCreate, TickerUpdate
+from app.timeutils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def create_ticker(session: AsyncSession, data: TickerCreate) -> Ticker:
         enabled=True,
         data_source=data.data_source.value,
         source_config=data.source_config,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
     )
     session.add(ticker)
     await session.flush()  # get the generated id without committing

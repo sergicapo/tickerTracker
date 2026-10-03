@@ -15,7 +15,7 @@ Shutdown sequence:
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 from app import crud, scheduler as sched
 from app.auth import verify_credentials
 from app.database import close_db, get_db, init_db
+from app.timeutils import utcnow
 from app.schemas import (
     CurrentPriceResponse,
     DailyPriceResponse,
@@ -118,7 +119,7 @@ app = FastAPI(
     summary="Health check (public)",
 )
 async def health_check():
-    return HealthResponse(status="ok", timestamp=datetime.utcnow())
+    return HealthResponse(status="ok", timestamp=utcnow())
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +165,10 @@ async def add_ticker(
     ticker = await crud.create_ticker(db, body)
 
     # Trigger immediate historical backfill for the new ticker (background task)
-    import asyncio
-    asyncio.create_task(sched.job_historical_backfill(ticker_id=ticker.id))
+    sched.spawn_background(
+        sched.job_historical_backfill(ticker_id=ticker.id),
+        name=f"backfill_{ticker.symbol}",
+    )
     logger.info("Historical backfill triggered for new ticker %s.", ticker.symbol)
 
     return ticker
